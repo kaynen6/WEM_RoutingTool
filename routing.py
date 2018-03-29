@@ -1,7 +1,7 @@
 ### WEM / HERE API Routing Tool
 ### Developed by Kayne Neigherbauer 2018 for WEM/WisDMA
 
-import json, urllib2, urllib, arcpy, string, os, time
+import json, urllib2, urllib, arcpy, string, os, time, requests
 import numpy as np
 
 def main():
@@ -11,26 +11,29 @@ def main():
     def fetch(url,payload):
         try:
             arcpy.AddMessage("Request Status from HERE API:")
-            r = requests.get(url, params = payload, timeout=0.1)
+            r = requests.get(url, params = payload, timeout=5, verify=False)
+            arcpy.AddMessage(r.url)
 ##            req = urllib2.Request(url+params)
 ##            openReq = urllib2.urlopen(req)
-            if r.status_code = 200:
+            if r.status_code == 200:
                 response = r.json()
                 arcpy.AddMessage(r.reason)
+                return response
             else:
                 r.raise_for_status()
                 arcpy.AddMessage(r.reason)
         except requests.exceptions.HTTPError as e:
-            error = "Http Error" + e
+            error = "Http Error" 
             arcpy.AddMessage(error)
-        except requests.exceptions.URLError as e:
-            error = "URL Error" + e
+        except requests.exceptions.URLRequired as e:
+            error = "URL Error" 
             arcpy.AddMessage(error)
         except requests.exceptions.ConnectionError as e:
-            error = "Connection Error" + e
+            error = "Connection Error" 
             arcpy.AddMessage(error)
+            arcpy.AddMessage(e.text)
         except requests.exceptions.RequestException as e:
-            error = "Other Request Error" + e
+            error = "Other Request Error" 
             arcpy.AddMessage(error)
         else:
             response = r.json()
@@ -45,19 +48,17 @@ def main():
         waypoints_fc = arcpy.GetParameterAsText(1)
         wp_list = []
         #cursor to get user points.
+        #check for no values/multiple values and message user
         with arcpy.da.SearchCursor(waypoints_fc, "SHAPE@XY") as s_cur:
-            #check for no values/multiple values and message user
-            row = s_cur.next()
-            while row:
+            for row in s_cur:
                 s_x, s_y = row[0]
                 wp_list.append((float(s_y), float(s_x)))
-                row = s_cur.next()
-        if wp_list.count() < 2:
+        if len(wp_list) < 2:
             arcpy.AddError("{0} has no features; Cannot calculate route.".format(waypoints_fc))
             return None
         else:
             arcpy.AddMessage(wp_list)
-            return (wp_list)
+            return wp_list
 
     
     ## function to create areas to avoid which will be processed by the HERE API. Using arcpy graphic buffer around 511 incident points
@@ -98,25 +99,24 @@ def main():
         # join bounding boxes into one string for API consumption
         bound_boxes = string.join(bound_boxes,"")
         #return the bounding boxes of buffers
-        arcpy.Delete_management(out_fc)
-        arcpy.Delete_management(proj_fc)
+##        arcpy.Delete_management(out_fc)
+##        arcpy.Delete_management(proj_fc)
         return bound_boxes
     
 
     ## use HERE API for directions that avoid given areas from one waypoint to another
-    def getHereDirs(waypoints,bound_boxes,link_ids):
+    def getHereDirs(waypoints,bound_boxes):
         # parse waypoints and HERE API url and parameters
         params = {}
-        for i in range(1,waypoints.count()):
-            params["waypoint"+i] = "geo!{0},{1}".format(waypoints[i][0],waypoints[i][1])
-        params["mode"] = "fastest,car,traffic:disabled"
+        for i in range(0,len(waypoints)):
+            params["waypoint"+str(i)] = "geo!{0},{1}".format(waypoints[i][0],waypoints[i][1])
+        params["mode"] = "fastest;car;traffic:disabled"
         params["avoidAreas"] = bound_boxes
         params["app_id"] = " "
         params["app_code"] = " "
         params["representation"] = "display"
         url = "https://route.cit.api.here.com/routing/7.2/calculateroute.json"
-
-        arcpy.AddMessage("Retrieving directions from: {0}".format(url)
+        arcpy.AddMessage(params)
         # fetch via web request
         response = fetch(url,params)
         return response
@@ -141,10 +141,14 @@ def main():
 
         # add to map dataframe
         arcpy.mapping.AddLayer(df, route_lyr)
+        time.sleep(0.5)
         #set symbology
-        sym = route_lyr.symbology
+        layer = arcpy.mapping.ListLayers(mxd, "route", df)[0]
+        sym = layer.symbology
         sym.renderer.symbol.size = "2.5"
         sym.renderer.symbol.color = "Dark Amethyst"
+        layer.symbology = sym
+        time.sleep(0.5)
         # refesh the map view and table of contents to display route
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
@@ -178,6 +182,7 @@ def main():
         route = getHereDirs(waypoints,avoid_areas)
         
         #process route and display on the map
+    if route:
         arcpy.SetProgressor("default", "Processing and Displaying Route...")
         processRoute(route)
 
