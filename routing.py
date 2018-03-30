@@ -6,15 +6,14 @@ import numpy as np
 
 def main():
     ### define functions first, calls below ###
-    
+
+
     #fucntion to form a web request and get response with url passed
     def fetch(url,payload):
         try:
             arcpy.AddMessage("Request Status from HERE API:")
             r = requests.get(url, params = payload, timeout=5, verify=False)
-            arcpy.AddMessage(r.url)
-##            req = urllib2.Request(url+params)
-##            openReq = urllib2.urlopen(req)
+            #arcpy.AddMessage(r.url)
             if r.status_code == 200:
                 response = r.json()
                 arcpy.AddMessage(r.reason)
@@ -44,11 +43,11 @@ def main():
         
     #function to grab to user defined points of origin and destination
     def getUserPoints():
-        #get file info from tool dialog
+            #get file info from tool dialog
         waypoints_fc = arcpy.GetParameterAsText(1)
         wp_list = []
-        #cursor to get user points.
-        #check for no values/multiple values and message user
+            #cursor to get user points.
+            #check for no values/multiple values and message user
         with arcpy.da.SearchCursor(waypoints_fc, "SHAPE@XY") as s_cur:
             for row in s_cur:
                 s_x, s_y = row[0]
@@ -57,26 +56,26 @@ def main():
             arcpy.AddError("{0} has no features; Cannot calculate route.".format(waypoints_fc))
             return None
         else:
-            arcpy.AddMessage(wp_list)
+            #arcpy.AddMessage(wp_list)
             return wp_list
 
     
     ## function to create areas to avoid which will be processed by the HERE API. Using arcpy graphic buffer around 511 incident points
     def bufferPoints(bufferDist,df):
-        # Local variables:
+            # Local variables:
         in_fc = "Database Connections\\own.WEMAPP.sde\\WEMAPP.WEM$OWN.Feeds_511\\WEMAPP.WEM$OWN.GetEvents"
         out_fc = "GetEvents_GraphicBuffer" 
         proj_fc = "GetEvents_GraphicBuffer_proj"
-        # Process: Graphic Buffer
+            # Process: Graphic Buffer
         arcpy.GraphicBuffer_analysis(in_fc, out_fc, bufferDist, "SQUARE", "MITER", "10", "0 DecimalDegrees")
-        #project the buffer
+            #project the buffer
         sr = arcpy.SpatialReference(4326)
         arcpy.Project_management(out_fc, proj_fc, sr)
-        #add it to the map for reference
+            #add it to the map for reference
         lyrFile = arcpy.mapping.Layer(proj_fc)
         arcpy.mapping.AddLayer(df, lyrFile)
         arcpy.RefreshTOC()
-        # get points of a bounding rectangle for each buffered point
+            # get points of a bounding rectangle for each buffered point
         rects = []
         with arcpy.da.SearchCursor(proj_fc, ["SHAPE@"]) as s_cur:
             for row in s_cur:
@@ -85,7 +84,7 @@ def main():
                 else:
                     arcpy.AddMessage("No Events at this time.")
         bound_boxes = []
-        #format for HERE API Bounding Box
+            #format for HERE API Bounding Box
         for box in rects:
             bound_boxes.append(box[1]+",")
             bound_boxes.append(box[0])
@@ -93,19 +92,19 @@ def main():
             bound_boxes.append(box[5]+",")
             bound_boxes.append(box[4])
             bound_boxes.append("!")
-        #remove trailing "!" separator
+            #remove trailing "!" separator
         if bound_boxes:
             bound_boxes.pop()
-        # join bounding boxes into one string for API consumption
+            # join bounding boxes into one string for API consumption
         bound_boxes = string.join(bound_boxes,"")
-        #return the bounding boxes of buffers
+            #return the bounding boxes of buffers
         return bound_boxes
     
 
     ## use HERE API for directions that avoid given areas from one waypoint to another
     def getHereDirs(waypoints,bound_boxes):
-        # parse waypoints and HERE API url and parameters
-        params = {"mode":"fastest;car;traffic:disabled",
+            # parse waypoints and HERE API url and parameters
+        params = {"mode":"fastest;car;traffic:enabled",
                   "avoidAreas": bound_boxes,
                   "representation": "display",
                   "instructionformat": "text",
@@ -118,40 +117,38 @@ def main():
         params["app_code"] = " "
         
         url = "https://route.cit.api.here.com/routing/7.2/calculateroute.json"
-        arcpy.AddMessage(params)
-        # fetch via web request
+            # fetch via web request
         response = fetch(url,params)
         return response
 
+
     # process and display the route
     def processRoute(route):
-        # JSON shape data
+            # JSON shape data
         shape = route["response"]["route"][0]["shape"]
         parts = route["response"]["route"][0]["leg"][0]["maneuver"]
-        
-        #get and save text of route directions
+            #get and save text of route directions
         text = ""
         for part in parts:
             inst = part["instruction"]
             text = text + inst + "\n"
         with open("directions.txt", "w") as f:
             f.write(text)
-        # arcpy array
         pt_array = arcpy.Array()
         for pt in shape:
             pts = string.split(pt,",")
             point = arcpy.Point(float(pts[1]),float(pts[0]))
             pt_array.add(point)
-        #set spatial reference and create a polyline
+            #set spatial reference and create a polyline
         sr = arcpy.SpatialReference(4326)
         route = arcpy.Polyline(pt_array, sr)
-        # save polyline feature
+            # save polyline feature
         arcpy.CopyFeatures_management(route, "route")
-        # make it a layer
+            # make it a layer
         route_lyr = arcpy.mapping.Layer("route")
-        # add to map dataframe
+            # add to map dataframe
         arcpy.mapping.AddLayer(df, route_lyr)
-        # refesh the map view and table of contents to display route
+            # refesh the map view and table of contents to display route
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
 
@@ -160,37 +157,37 @@ def main():
         
     ## begin main function calls and variables ##
   
-    #set environment workspace and other settings
+        #set environment workspace and other settings
     arcpy.env.workspace = "C:\\Users\\Kayne.Neigherbauer\\Documents\\ArcGIS\\Default.gdb"
     arcpy.env.overwriteOutput = True
     
-    # current mxd
+        # current mxd
     mxd = arcpy.mapping.MapDocument("CURRENT")
-    #mxd dataframe
+        #mxd dataframe
     df = arcpy.mapping.ListDataFrames(mxd, "Layers")[0]
-    # user specified buffer distance around 511 points
+        # user specified buffer distance around 511 points
     bufferDist = arcpy.GetParameterAsText(0)
     
-    # calls function that retrieves user origin and destination points
-    #set progressor for some context
+        # calls function that retrieves user origin and destination points
+        #set progressor for some context
     arcpy.SetProgressorLabel("Gathering and Processing User Points...")
     waypoints = getUserPoints()
 
-    #buffer 511 points
+        #buffer 511 points
     arcpy.SetProgressorLabel("Buffering 511 Points...")
     avoid_areas = bufferPoints(bufferDist,df)
 
-    # fetch route from HERE API if waypoints exist
+        # fetch route from HERE API if waypoints exist
     arcpy.SetProgressorLabel("Retrieving Route from HERE API...")
     if waypoints:
         route = getHereDirs(waypoints,avoid_areas)
         
-    #process route and display on the map
+        #process route and display on the map
     if route:
         arcpy.SetProgressorLabel("Processing and Displaying Route...")
         processRoute(route)
 
-    #cleanup and clear env
+        #cleanup and clear env
     arcpy.ClearEnvironment("workspace")
                                  
 
