@@ -1,7 +1,7 @@
 ### WEM / HERE API Routing Tool
 ### Developed by Kayne Neigherbauer 2018 for WEM/WisDMA
 
-import json, urllib2, urllib, arcpy, string, os, time, requests
+import json, arcpy, string, os, time, requests
 import numpy as np
 
 def main():
@@ -99,22 +99,24 @@ def main():
         # join bounding boxes into one string for API consumption
         bound_boxes = string.join(bound_boxes,"")
         #return the bounding boxes of buffers
-##        arcpy.Delete_management(out_fc)
-##        arcpy.Delete_management(proj_fc)
         return bound_boxes
     
 
     ## use HERE API for directions that avoid given areas from one waypoint to another
     def getHereDirs(waypoints,bound_boxes):
         # parse waypoints and HERE API url and parameters
-        params = {}
+        params = {"mode":"fastest;car;traffic:disabled",
+                  "avoidAreas": bound_boxes,
+                  "representation": "display",
+                  "instructionformat": "text",
+                  "metricSystem": "imperial",
+                  "avoidseasonalclosures" : "true"
+                  }
         for i in range(0,len(waypoints)):
             params["waypoint"+str(i)] = "geo!{0},{1}".format(waypoints[i][0],waypoints[i][1])
-        params["mode"] = "fastest;car;traffic:disabled"
-        params["avoidAreas"] = bound_boxes
         params["app_id"] = " "
         params["app_code"] = " "
-        params["representation"] = "display"
+        
         url = "https://route.cit.api.here.com/routing/7.2/calculateroute.json"
         arcpy.AddMessage(params)
         # fetch via web request
@@ -123,8 +125,17 @@ def main():
 
     # process and display the route
     def processRoute(route):
-        # JSON shape 
+        # JSON shape data
         shape = route["response"]["route"][0]["shape"]
+        parts = route["response"]["route"][0]["leg"][0]["maneuver"]
+        
+        #get and save text of route directions
+        text = ""
+        for part in parts:
+            inst = part["instruction"]
+            text = text + inst + "\n"
+        with open("directions.txt", "w") as f:
+            f.write(text)
         # arcpy array
         pt_array = arcpy.Array()
         for pt in shape:
@@ -138,22 +149,15 @@ def main():
         arcpy.CopyFeatures_management(route, "route")
         # make it a layer
         route_lyr = arcpy.mapping.Layer("route")
-
         # add to map dataframe
         arcpy.mapping.AddLayer(df, route_lyr)
-        time.sleep(0.5)
-        #set symbology
-        layer = arcpy.mapping.ListLayers(mxd, "route", df)[0]
-        sym = layer.symbology
-        sym.renderer.symbol.size = "2.5"
-        sym.renderer.symbol.color = "Dark Amethyst"
-        layer.symbology = sym
-        time.sleep(0.5)
         # refesh the map view and table of contents to display route
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
-        
 
+        arcpy.SetProgressorLabel("Writing Directions to file...")
+
+        
     ## begin main function calls and variables ##
   
     #set environment workspace and other settings
@@ -169,24 +173,24 @@ def main():
     
     # calls function that retrieves user origin and destination points
     #set progressor for some context
-    arcpy.SetProgressor("default", "Gathering and Processing User Points...")
+    arcpy.SetProgressorLabel("Gathering and Processing User Points...")
     waypoints = getUserPoints()
 
     #buffer 511 points
-    arcpy.SetProgressor("default", "Buffering 511 Points...")
+    arcpy.SetProgressorLabel("Buffering 511 Points...")
     avoid_areas = bufferPoints(bufferDist,df)
 
     # fetch route from HERE API if waypoints exist
-    arcpy.SetProgressor("default", "Retrieving Route from HERE API...")
+    arcpy.SetProgressorLabel("Retrieving Route from HERE API...")
     if waypoints:
         route = getHereDirs(waypoints,avoid_areas)
         
-        #process route and display on the map
+    #process route and display on the map
     if route:
-        arcpy.SetProgressor("default", "Processing and Displaying Route...")
+        arcpy.SetProgressorLabel("Processing and Displaying Route...")
         processRoute(route)
 
-    #clear env
+    #cleanup and clear env
     arcpy.ClearEnvironment("workspace")
                                  
 
