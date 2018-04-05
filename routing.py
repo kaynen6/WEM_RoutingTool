@@ -2,6 +2,7 @@
 ### Developed by Kayne Neigherbauer 2018 for WEM/WisDMA
 
 import json, arcpy, string, os, time, requests
+from datetime import datetime, timedelta
 import numpy as np
 
 def main():
@@ -99,17 +100,30 @@ def main():
         bound_boxes = string.join(bound_boxes,"")
             #return the bounding boxes of buffers
         return bound_boxes
+
+    def processDateTime(dTime):
+        arcpy.AddMessage("Input:")
+        arcpy.AddMessage(dTime)
+        arcpy.AddMessage("Processed:")
+        dTFmt = datetime.strptime(dTime, "%m/%d/%Y %I:%M:%S %p")
+        startTime = dTFmt
+        dT = dTFmt.isoformat()
+        arcpy.AddMessage(dT)
+        return dT, startTime
+        
+        
     
 
     ## use HERE API for directions that avoid given areas from one waypoint to another
-    def getHereDirs(waypoints,bound_boxes):
+    def getHereDirs(waypoints,bound_boxes, dT):
             # parse waypoints and HERE API url and parameters
         params = {"mode":"fastest;car;traffic:enabled",
                   "avoidAreas": bound_boxes,
                   "representation": "display",
                   "instructionformat": "text",
                   "metricSystem": "imperial",
-                  "avoidseasonalclosures" : "true"
+                  "avoidseasonalclosures" : "true",
+                  "departure" : dT
                   }
         for i in range(0,len(waypoints)):
             params["waypoint"+str(i)] = "geo!{0},{1}".format(waypoints[i][0],waypoints[i][1])
@@ -123,17 +137,30 @@ def main():
 
 
     # process and display the route
-    def processRoute(route):
+    def processRoute(route,dT,startTime):
             # JSON shape data
         shape = route["response"]["route"][0]["shape"]
         parts = route["response"]["route"][0]["leg"][0]["maneuver"]
             #get and save text of route directions
-        text = ""
+        arcpy.SetProgressorLabel("Writing Directions to file...")
+        text = "Depart at {0}\n".format(dT.replace("T"," "))
+        totalSecs = 0
         for part in parts:
+            travelTime = str(timedelta(seconds = part["travelTime"]))
+            totalSecs += int(part["travelTime"])
+            time = part["time"]
+            newtime = time.rpartition("-")[0]
+            timeStamp = datetime.strptime(newtime,"%Y-%m-%dT%H:%M:%S")
             inst = part["instruction"]
-            text = text + inst + "\n"
+            text = "{0}Approximate Time: {1}\n".format(text,timeStamp.strftime("%H:%M"))
+            text = "{0}{1} {2}{3}\n\n".format(text,inst,"Travel Time for Leg: ",travelTime)
+        totalTime = timedelta(seconds = totalSecs)
+        eta = startTime + totalTime
+        text = "{0}\nEstimate Time of Arrival: {1}\nTotal Travel Time: {2}".format(text, eta,str(totalTime))
+        
         with open("directions.txt", "w") as f:
             f.write(text)
+        arcpy.SetProgressorLabel("Processing and Displaying Route...")
         pt_array = arcpy.Array()
         for pt in shape:
             pts = string.split(pt,",")
@@ -143,16 +170,27 @@ def main():
         sr = arcpy.SpatialReference(4326)
         route = arcpy.Polyline(pt_array, sr)
             # save polyline feature
-        arcpy.CopyFeatures_management(route, "route")
+        arcpy.CopyFeatures_management(route, "Route")
             # make it a layer
-        route_lyr = arcpy.mapping.Layer("route")
+        route_lyr = arcpy.mapping.Layer("Route")
             # add to map dataframe
         arcpy.mapping.AddLayer(df, route_lyr)
+            #style the layers based on a source layer files with same geom types
+            #route lines
+        updateLayer = arcpy.mapping.ListLayers(mxd, "Route", df)[0]
+        styleLayer = arcpy.mapping.Layer("line.lyr")
+        arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
+            #waypoints
+        updateLayer = arcpy.mapping.ListLayers(mxd, "Waypoints", df)[0]
+        styleLayer = arcpy.mapping.Layer("point.lyr")
+        arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
+            #buffer polygons, just so it looks decent if needed
+        updateLayer = arcpy.mapping.ListLayers(mxd, "GetEvents_GraphicBuffer_proj", df)[0]
+        styleLayer = arcpy.mapping.Layer("polygon.lyr")
+        arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
             # refesh the map view and table of contents to display route
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
-
-        arcpy.SetProgressorLabel("Writing Directions to file...")
 
         
     ## begin main function calls and variables ##
@@ -165,8 +203,11 @@ def main():
     mxd = arcpy.mapping.MapDocument("CURRENT")
         #mxd dataframe
     df = arcpy.mapping.ListDataFrames(mxd, "Layers")[0]
+        # use inpute params
         # user specified buffer distance around 511 points
     bufferDist = arcpy.GetParameterAsText(0)
+        # user input parameters for departure time and date
+    dTime = arcpy.GetParameterAsText(2)
     
         # calls function that retrieves user origin and destination points
         #set progressor for some context
@@ -177,15 +218,16 @@ def main():
     arcpy.SetProgressorLabel("Buffering 511 Points...")
     avoid_areas = bufferPoints(bufferDist,df)
 
+    dT, startTime = processDateTime(dTime)
+    
         # fetch route from HERE API if waypoints exist
     arcpy.SetProgressorLabel("Retrieving Route from HERE API...")
     if waypoints:
-        route = getHereDirs(waypoints,avoid_areas)
+        route = getHereDirs(waypoints,avoid_areas,dT)
         
         #process route and display on the map
     if route:
-        arcpy.SetProgressorLabel("Processing and Displaying Route...")
-        processRoute(route)
+        processRoute(route,dT,startTime)
 
         #cleanup and clear env
     arcpy.ClearEnvironment("workspace")
