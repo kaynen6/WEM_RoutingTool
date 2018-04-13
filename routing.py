@@ -7,14 +7,13 @@ import arcpy
 import requests
 
 def main():
-    ### define functions first, calls below ###
+    ## define functions first, calls below ##
 
-    # fucntion to form a web request and get response with url passed
+    # function to form a web request and get response with url passed
     def fetch(url, payload):
         try:
-            #arcpy.AddMessage(payload)
-            #arcpy.AddMessage("Request Status from HERE API:")
-            r = requests.get(url, params = payload, timeout = 10, verify = False)
+            # arcpy.AddMessage("Request Status from HERE API:")
+            r = requests.get(url, params=payload, timeout=10, verify=False)
             if r.status_code == 200:
                 response = r.json()
                 arcpy.AddMessage(r.reason)
@@ -38,8 +37,10 @@ def main():
             if "error" in response:
                 arcpy.AddMessage(response["Error"])
             else:
-                arcpy.AddMessage(r.text())
+                text = r.text
+                arcpy.AddMessage(text)
             #return response
+
 
     # function to grab to user defined points of origin and destination
     def get_user_points():
@@ -59,15 +60,9 @@ def main():
             # arcpy.AddMessage(wp_list)
             return wp_list
 
-    # get navteq link ids reported from 511 where
-    # def getLinkIds(fc):
-    #     linkList = []
-    #     #"Severity",
-    #     with arcpy.da.SearchCursor(fc, ["NavteqLinkId",  "EventType", "EventSubType"]) as s_cur:
-    #         for row in s_cur:
-    #             linkList.append(row[0])
 
-    ## function to create areas to avoid which will be processed by the HERE API. Using arcpy graphic buffer around 511 incident points
+    # function to create areas to avoid which will be processed by the HERE API.
+    # Using arcpy graphic buffer around 511 incident points
     def buffer_points(bufferDist, severityList):
         # Local variables:
         in_fc = "Database Connections\\own.WEMAPP.sde\\WEMAPP.WEM$OWN.Feeds_511\\WEMAPP.WEM$OWN.GetEvents"
@@ -84,7 +79,7 @@ def main():
         arcpy.RefreshTOC()
         # get points of a bounding rectangle for each buffered point
         rects = []
-        with arcpy.da.SearchCursor(proj_fc, ["SHAPE@","Severity"]) as s_cur:
+        with arcpy.da.SearchCursor(proj_fc, ["SHAPE@", "Severity"]) as s_cur:
             for row in s_cur:
                 if row[0]:
                     if row[1] in severityList:
@@ -109,6 +104,7 @@ def main():
         # return the bounding boxes of buffers
         return bound_boxes
 
+
     def process_date_time(dTime):
         # format the departure time to HERE API specs
         # parse date and time input into a datetime object
@@ -119,15 +115,15 @@ def main():
         dT = dTFmt.isoformat()
         return dT, startTime
 
+
     ## use HERE API for directions that avoid given areas from one waypoint to another
     def get_here_dirs(waypoints, avoidAreas, dT):
-        arcpy.AddMessage(dT)
         # parse waypoints and HERE API url and parameters
         params = {"mode": "fastest;car;traffic:enabled",
                   "representation": "display",
                   "instructionFormat": "text",
                   "metricSystem": "imperial",
-                  "avoidseasonalclosures": "true",
+                  "avoidSeasonalClosures": "true",
                   "departure": dT
                   }
         for i in range(0, len(waypoints)):
@@ -140,6 +136,7 @@ def main():
         # fetch via web request
         response = fetch(url, params)
         return response
+
 
     # process and display the route
     def process_route(route, dT, startTime):
@@ -156,8 +153,8 @@ def main():
             totalSecs += int(part["travelTime"])
             time = part["time"]
             # strip the end time zone data off, can't parse/don't need
-            newtime = time.rpartition("-")[0]
-            timeStamp = datetime.strptime(newtime, "%Y-%m-%dT%H:%M:%S")
+            newTime = time.rpartition("-")[0]
+            timeStamp = datetime.strptime(newTime, "%Y-%m-%dT%H:%M:%S")
             # instructions data
             inst = part["instruction"]
             # format the text and append
@@ -197,21 +194,26 @@ def main():
         styleLayer = arcpy.mapping.Layer("point.lyr")
         arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
         # buffer polygons, just so it looks decent if needed
-        updateLayer = arcpy.mapping.ListLayers(mxd, "GetEvents_GraphicBuffer_proj", df)[0]
-        styleLayer = arcpy.mapping.Layer("polygon.lyr")
-        arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
-        # refesh the map view and table of contents to display route
+        if arcpy.mapping.ListLayers(mxd, "GetEvents_GraphicBuffer_proj", df):
+            updateLayer = arcpy.mapping.ListLayers(mxd, "GetEvents_GraphicBuffer_proj", df)[0]
+            styleLayer = arcpy.mapping.Layer("polygon.lyr")
+            arcpy.mapping.UpdateLayer(df, updateLayer, styleLayer, True)
+            updateLayer.visible = False
+        # refresh the map view and table of contents to display route
         arcpy.RefreshTOC()
         arcpy.RefreshActiveView()
+        del route_lyr
+        del styleLayer
+        del updateLayer
+
 
     ## begin main function calls and variables ##
 
     # set environment workspace and other settings
-    arcpy.env.workspace = "C:\\Users\\Kayne.Neigherbauer\\Documents\\ArcGIS\\Default.gdb"
+    #arcpy.env.scratchWorkspace = arcpy.GetSystemEnvironment("TEMP")
     arcpy.env.overwriteOutput = True
     # database feature class holding near real-time 511 traffic event data
     eventsFc = "Database Connections\\own.WEMAPP.sde\\WEMAPP.WEM$OWN.Feeds_511\\WEMAPP.WEM$OWN.GetEvents"
-
     # current mxd
     mxd = arcpy.mapping.MapDocument("CURRENT")
     # mxd dataframe
@@ -221,7 +223,6 @@ def main():
     bufferDist = arcpy.GetParameterAsText(0)
     # user input parameters for departure time and date
     dTime = arcpy.GetParameterAsText(2)
-
     #user input for incident severity to avoid
     severityList = []
     if arcpy.GetParameterAsText(3):
@@ -231,31 +232,25 @@ def main():
             newSevList = item.split(":")
             newSevList[0] = newSevList[0].lstrip("'")
             severityList.append(int(newSevList[0]))
-
     # calls function that retrieves user origin and destination points
     # set progressor for some context
     arcpy.SetProgressorLabel("Gathering and Processing User Points...")
     waypoints = get_user_points()
-
     # buffer 511 points
-    arcpy.SetProgressorLabel("Buffering 511 Points...")
-    avoidAreas = buffer_points(bufferDist, severityList)
-    # get NavteqLinkIds for links to avoid
-    # avoid_links = getLinkIds(eventsFc)
-
+    arcpy.SetProgressorLabel("Processing 511 Traffic Incidents Points...")
+    if bufferDist:
+        avoidAreas = buffer_points(bufferDist, severityList)
+    else:
+        avoidAreas = None
+    # process and format date and time data
     dT, startTime = process_date_time(dTime)
-
     # fetch route from HERE API if waypoints exist
     arcpy.SetProgressorLabel("Retrieving Route from HERE API...")
     if waypoints:
         route = get_here_dirs(waypoints, avoidAreas, dT)
-
     # process route and display on the map
     if route:
         process_route(route, dT, startTime)
-
-    # cleanup and clear env
-    arcpy.ClearEnvironment("workspace")
 
 
 if __name__ == "__main__":
