@@ -13,12 +13,15 @@ def main():
     def fetch(url, payload):
         try:
             # arcpy.AddMessage("Request Status from HERE API:")
-            r = requests.get(url, params=payload, timeout=10, verify=False)
+            request = requests.get(url, params=payload, timeout=100, verify=False)
+            r = request
             if r.status_code == 200:
-                response = r.json()
-                arcpy.AddMessage(r.reason)
+                if r.json():
+                    response = r.json()
+                elif r.raw():
+                    response = r.raw()
                 return response
-            else:
+            elif r.status_code:
                 arcpy.AddMessage(r.status_code)
         except requests.exceptions.HTTPError as e:
             error = "Http Error"
@@ -119,20 +122,20 @@ def main():
     ## use HERE API for directions that avoid given areas from one waypoint to another
     def get_here_dirs(waypoints, avoidAreas, dT):
         # parse waypoints and HERE API url and parameters
-        params = {"mode": "fastest;car;traffic:enabled",
-                  "representation": "display",
-                  "instructionFormat": "text",
-                  "metricSystem": "imperial",
-                  "avoidSeasonalClosures": "true",
-                  "departure": dT
+        params = {'mode': 'fastest;car;traffic:enabled',
+                  'representation': 'display',
+                  'instructionFormat': 'text',
+                  'metricSystem': 'imperial',
+                  'avoidSeasonalClosures': 'true',
+                  'departure': dT
                   }
         for i in range(0, len(waypoints)):
-            params["waypoint" + str(i)] = "{0},{1}".format(waypoints[i][0], waypoints[i][1])
+            params['waypoint{0}'.format(str(i))] = "{0},{1}".format(waypoints[i][0], waypoints[i][1])
         if avoidAreas:
-            params["avoidAreas"] = avoidAreas
-        params["app_id"] = " "
-        params["app_code"] = " "
-        url = "https://route.cit.api.here.com/routing/7.2/calculateroute.json"
+            params['avoidAreas'] = avoidAreas
+        params['app_id'] = '  '
+        params['app_code'] = '  '
+        url = 'https://route.cit.api.here.com/routing/7.2/calculateroute.json'
         # fetch via web request
         response = fetch(url, params)
         return response
@@ -229,9 +232,9 @@ def main():
         severityParam = arcpy.GetParameterAsText(3)
         severityInputList = severityParam.split(";")
         for item in severityInputList:
-            newSevList = item.split(":")
-            newSevList[0] = newSevList[0].lstrip("'")
-            severityList.append(int(newSevList[0]))
+            newItem = item.strip('"')
+            severityList.append(newItem)
+        arcpy.AddMessage(severityList)
     # calls function that retrieves user origin and destination points
     # set progressor for some context
     arcpy.SetProgressorLabel("Gathering and Processing User Points...")
