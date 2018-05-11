@@ -66,11 +66,42 @@ def main():
 
     # function to create areas to avoid which will be processed by the HERE API.
     # Using arcpy graphic buffer around 511 incident points
-    def buffer_points(bufferDist, severityList):
+    def traffic_avoid_points(bufferDist, severityList):
         # Local variables:
         in_fc = "Database Connections\\own.WEMAPP.sde\\WEMAPP.WEM$OWN.Feeds_511\\WEMAPP.WEM$OWN.GetEvents"
         out_fc = "GetEvents_GraphicBuffer"
         proj_fc = "GetEvents_GraphicBuffer_proj"
+        buffer_points(in_fc, out_fc, proj_fc, bufferDist)
+        # get points of a bounding rectangle for each buffered point
+        traffic_rects = []
+        with arcpy.da.SearchCursor(proj_fc, ["SHAPE@", "Severity"]) as s_cur:
+            for row in s_cur:
+                if row[0]:
+                    if row[1] in severityList:
+                        traffic_rects.append((row[0].hullRectangle.split(" ")))
+                else:
+                    arcpy.AddMessage("No 511 Traffic Events at this time.")
+        #do similar for user defined points to avoid
+        in_fc = arcpy.GetParameterAsText(2)
+        user_rects = []
+        if in_fc:
+            out_fc = "UserEvents_GraphicBuffer"
+            proj_fc = "UserEvents_GraphicBuffer_proj"
+            buffer_points(in_fc, out_fc, proj_fc, bufferDist)
+            with arcpy.da.SearchCursor(proj_fc, ["SHAPE@"]) as s_cur:
+                for row in s_cur:
+                    user_rects.append((row[0].hullRectangle.split(" ")))
+        else: arcpy.AddMessage("No User Defined Events at this time.")
+        #combine for processing
+        for rect in user_rects:
+            traffic_rects.append(rect)
+        #process into bounding box data for HERE API
+        bound_boxes = create_boxes(traffic_rects)
+        # return the bounding boxes of buffers
+        return bound_boxes
+
+    #buffers points to avoid via defined dist
+    def buffer_points(in_fc, out_fc, proj_fc, bufferDist):
         # Process: Graphic Buffer
         arcpy.GraphicBuffer_analysis(in_fc, out_fc, bufferDist, "SQUARE", "MITER", "10", "0 DecimalDegrees")
         # project the buffer
@@ -80,15 +111,9 @@ def main():
         lyrFile = arcpy.mapping.Layer(proj_fc)
         arcpy.mapping.AddLayer(df, lyrFile)
         arcpy.RefreshTOC()
-        # get points of a bounding rectangle for each buffered point
-        rects = []
-        with arcpy.da.SearchCursor(proj_fc, ["SHAPE@", "Severity"]) as s_cur:
-            for row in s_cur:
-                if row[0]:
-                    if row[1] in severityList:
-                        rects.append((row[0].hullRectangle.split(" ")))
-                else:
-                    arcpy.AddMessage("No Events at this time.")
+
+
+    def create_boxes(rects):
         bound_boxes = []
         # format for HERE API Bounding Box
         for box in rects:
@@ -225,11 +250,11 @@ def main():
     # user specified buffer distance around 511 points
     bufferDist = arcpy.GetParameterAsText(0)
     # user input parameters for departure time and date
-    dTime = arcpy.GetParameterAsText(2)
+    dTime = arcpy.GetParameterAsText(3)
     #user input for incident severity to avoid
     severityList = []
-    if arcpy.GetParameterAsText(3):
-        severityParam = arcpy.GetParameterAsText(3)
+    if arcpy.GetParameterAsText(4):
+        severityParam = arcpy.GetParameterAsText(4)
         severityInputList = severityParam.split(";")
         for item in severityInputList:
             newItem = item.strip('"')
@@ -242,7 +267,7 @@ def main():
     # buffer 511 points
     arcpy.SetProgressorLabel("Processing 511 Traffic Incidents Points...")
     if bufferDist:
-        avoidAreas = buffer_points(bufferDist, severityList)
+        avoidAreas = traffic_avoid_points(bufferDist, severityList)
     else:
         avoidAreas = None
     # process and format date and time data
